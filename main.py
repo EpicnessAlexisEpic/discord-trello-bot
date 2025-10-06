@@ -1,16 +1,28 @@
+# main.py
 import os
 import requests
 import random
 import time
 from datetime import datetime, timedelta
+import sys
 
 # -----------------------------
-# Environment variables
+# Configuration (env vars)
 # -----------------------------
 TRELLO_KEY = os.getenv("TRELLO_KEY")
 TRELLO_TOKEN = os.getenv("TRELLO_TOKEN")
 TRELLO_BOARD_ID = os.getenv("TRELLO_BOARD_ID")
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
+
+# sanity check
+missing = [name for name, val in [
+    ("TRELLO_KEY", TRELLO_KEY),
+    ("TRELLO_TOKEN", TRELLO_TOKEN),
+    ("TRELLO_BOARD_ID", TRELLO_BOARD_ID),
+    ("DISCORD_WEBHOOK", WEBHOOK_URL),
+] if not val]
+if missing:
+    raise SystemExit(f"Missing environment variables: {', '.join(missing)}")
 
 BOARD_URL = (
     f"https://api.trello.com/1/boards/{TRELLO_BOARD_ID}/lists"
@@ -21,10 +33,11 @@ BOARD_URL = (
 LAST_RUN_FILE = "last_run.txt"
 
 # -----------------------------
-# Sora dialogue customization
+# Dialogue lists (100 each)
+# (copy-paste-ready; text/kaomoji emoticons)
 # -----------------------------
 intros = [
-"I just peeked at your board and I’m so excited to share what I found! :-)",
+ "I just peeked at your board and I’m so excited to share what I found! :-)",
  "Hi Alex — I had a little look at your board and I’ve got news! =)",
  "Good news! I checked your Trello and want to tell you about it :D",
  "Hey — I looked over your board and I’m here to cheer you on ;-)",
@@ -86,7 +99,7 @@ intros = [
  "Hi Alex — I checked your board and I’m cheering you on (°∀°)b",
  "Hey! I took a look at your Trello and I’m feeling lively (o^_^o)",
  "Hello Alex — I checked your board and I’m all encouragement (´ ▽｀)",
- "Hi! I peeked at your Trello and I’m sending gentle push (｀・ω・´)",
+ "Hi! I peeked at your Trello and I’m sending a little pep (｀・ω・´)",
  "Hey Alex — I looked at your board and I’m quietly enthusiastic (︶ω︶)",
  "Hello! I checked your Trello and I’ve got warm words (✪ω✪)",
  "Hi Alex — I peeked at your lists and I’m happy to report (＾_＾;)",
@@ -122,7 +135,7 @@ intros = [
 ]
 
 encouragements_done = [
-"Wow Alex, amazing progress — that’s brilliant! :-D",
+ "Wow Alex, amazing progress — that’s brilliant! :-D",
  "Incredible work, Alex — you’re doing so well =D",
  "I’m so proud of you — keep shining! ;D",
  "Fantastic job, Alex — that’s worth celebrating ;)",
@@ -219,7 +232,7 @@ encouragements_done = [
 ]
 
 encouragements_none = [
-  "Hmm… it looks a bit quiet on progress today. Don’t worry — you’ve got this :)",
+ "Hmm… it looks a bit quiet on progress today. Don’t worry — you’ve got this :)",
  "It’s okay if nothing moved today. Small steps tomorrow! :D",
  "No rush — we’ll make progress soon =)",
  "Don’t be hard on yourself — we can start small ;)",
@@ -316,7 +329,7 @@ encouragements_none = [
 ]
 
 endings = [
-"Here’s the full board so you can see everything and plan your next steps! (^-^)",
+ "Here’s the full board so you can see everything and plan your next steps! (^-^)",
  "I’ve attached the full board below — ready for you to conquer it! (=^.^=)",
  "Take a look at the full board, Alex! Let’s keep moving forward! (＾ω＾)",
  "The full board is below — take your time and decide what to do next (^_−)☆",
@@ -360,7 +373,7 @@ endings = [
  "I added the full board — look when you’re ready (っ˘ω˘ς )",
  "Full details attached — choose one small thing (っ◔◡◔)っ",
  "I included the board — take a deep breath first (＾▽＾)",
- "File attached — you can do this step by step (☆^_^)",
+ "File attached — then we’ll tackle it (☆^_^)",
  "Full report is attached — plan with care (°◡°)",
  "I added the board — hope it helps you decide (¬_¬)",
  "Full file below — go at your pace (￣︶￣)",
@@ -411,9 +424,10 @@ endings = [
 ]
 
 # -----------------------------
-# Functions
+# Helper functions
 # -----------------------------
 def get_time_greeting():
+    """Return time-aware greeting"""
     now = datetime.now()
     hour = now.hour
     if 5 <= hour < 12:
@@ -426,11 +440,13 @@ def get_time_greeting():
         return "Good night, Alex! (•‿•)"
 
 def get_board_data():
+    """Fetch lists + cards + checklists from Trello"""
     r = requests.get(BOARD_URL)
     r.raise_for_status()
     return r.json()
 
 def get_priority_emoji(card):
+    """Return short text emoji based on label keywords (few standard symbols)"""
     emojis = {
         "high": "!!",
         "medium": "!",
@@ -440,13 +456,14 @@ def get_priority_emoji(card):
     }
     if "labels" in card and card["labels"]:
         for label in card["labels"]:
-            name = label["name"].lower()
+            name = (label.get("name") or "").lower()
             for keyword, emoji in emojis.items():
                 if keyword in name:
                     return emoji
-    return ":"
+    return ":"  # default small text marker
 
 def sora_summary(total_lists, total_cards, completed_cards, total_items, completed_items):
+    """Construct the Sora-style summary message"""
     time_greeting = get_time_greeting()
     intro = random.choice(intros)
     ending = random.choice(endings)
@@ -471,10 +488,10 @@ def sora_summary(total_lists, total_cards, completed_cards, total_items, complet
         f"{ending}\n\n"
         f"Here’s the full board so you can see everything:"
     )
-
     return text
 
 def generate_report(board_data):
+    """Generate full .txt report and summary counts"""
     lines = []
     total_cards = 0
     completed_cards = 0
@@ -482,20 +499,25 @@ def generate_report(board_data):
     completed_checklist_items = 0
 
     for lst in board_data:
-        list_name = lst["name"]
+        list_name = lst.get("name", "Unnamed list")
         lines.append(f"📋 {list_name}")
         lines.append("")
 
         for card in lst.get("cards", []):
-            card_name = card["name"]
+            card_name = card.get("name", "Untitled card")
             emoji = get_priority_emoji(card)
 
-            checklist_items = [item for cl in card.get("checklists", []) for item in cl["checkItems"]]
+            # Gather checklist items for this card
+            checklist_items = []
+            for cl in card.get("checklists", []):
+                for it in cl.get("checkItems", []):
+                    checklist_items.append(it)
+
             if checklist_items:
-                completed_items = sum(1 for item in checklist_items if item["state"] == "complete")
-                card_done = completed_items == len(checklist_items)
+                completed_items_count = sum(1 for it in checklist_items if it.get("state") == "complete")
+                card_done = (completed_items_count == len(checklist_items))
             else:
-                completed_items = 0
+                completed_items_count = 0
                 card_done = False
 
             card_status = "✅" if card_done else "❌"
@@ -504,25 +526,39 @@ def generate_report(board_data):
             if card_done:
                 completed_cards += 1
 
-            for checklist in card.get("checklists", []):
-                lines.append(f"│   📑 {checklist['name']}:")
-                for item in checklist["checkItems"]:
-                    item_name = item["name"]
-                    item_status = "✅" if item["state"] == "complete" else "❌"
+            # Add per-checklist sections (preserve checklist names)
+            for cl in card.get("checklists", []):
+                cl_name = cl.get("name", "Checklist")
+                lines.append(f"│   📑 {cl_name}:")
+                for item in cl.get("checkItems", []):
+                    item_name = item.get("name", "")
+                    item_status = "✅" if item.get("state") == "complete" else "❌"
                     lines.append(f"│   ├─ {item_name} - {item_status}")
                     total_checklist_items += 1
-                    if item["state"] == "complete":
+                    if item.get("state") == "complete":
                         completed_checklist_items += 1
 
-            # Add Sora commentary per card
+            # Per-card Sora commentary (use simple tailored lines)
             if card_done:
-                lines.append(f"│   Note from Sora: Yay! You finished this one :] Great job, Alex! (≧▽≦)")
+                # praise line - pick from encouragements_done but short
+                praise = random.choice([
+                    "Yay! You finished this one :] Great job, Alex! (≧▽≦)",
+                    "Nice! This one is done — wonderful work! :)",
+                    "Amazing — you completed it, Alex! :]",
+                    "Nice finishing touch — well done! (•‿•)"
+                ])
+                lines.append(f"│   Note from Sora: {praise}")
             else:
-                lines.append(f"│   Note from Sora: Keep going, Alex! You got this! :)")
+                pep = random.choice([
+                    "Keep going, Alex! You got this! :)",
+                    "A little push and this will be done — believe in you! :]",
+                    "You can do it — take it one step at a time (•‿•)",
+                    "Stay steady, Alex — small steps win the race (≧▽≦)"
+                ])
+                lines.append(f"│   Note from Sora: {pep}")
 
-            lines.append("")
-
-        lines.append("")
+            lines.append("")  # spacing between cards
+        lines.append("")  # spacing between lists
 
     report_text = "\n".join(lines)
     short_summary = sora_summary(
@@ -532,49 +568,82 @@ def generate_report(board_data):
         total_checklist_items,
         completed_checklist_items
     )
-
     return report_text, short_summary
 
 def send_to_discord_file(report_text, summary):
-    requests.post(WEBHOOK_URL, json={"content": summary}).raise_for_status()
+    """Send summary text then send the .txt file via webhook"""
+    # Send summary message (text)
+    post = requests.post(WEBHOOK_URL, json={"content": summary})
+    post.raise_for_status()
+
+    # Write file
     with open("trello_report.txt", "w", encoding="utf-8") as f:
         f.write(report_text)
+
+    # Send file
     with open("trello_report.txt", "rb") as f:
         r = requests.post(WEBHOOK_URL, files={"file": f})
         r.raise_for_status()
 
 # -----------------------------
-# Randomized run with progressive probability
+# Main: progressive probability + random delay
 # -----------------------------
-if __name__ == "__main__":
-    # Read last run date
+def read_last_run():
     if os.path.exists(LAST_RUN_FILE):
-        with open(LAST_RUN_FILE, "r") as f:
-            last_run_str = f.read().strip()
-            last_run = datetime.strptime(last_run_str, "%Y-%m-%d")
+        try:
+            with open(LAST_RUN_FILE, "r", encoding="utf-8") as f:
+                txt = f.read().strip()
+                return datetime.strptime(txt, "%Y-%m-%d").date()
+        except Exception:
+            return None
+    return None
+
+def write_last_run(date_obj):
+    with open(LAST_RUN_FILE, "w", encoding="utf-8") as f:
+        f.write(date_obj.strftime("%Y-%m-%d"))
+
+if __name__ == "__main__":
+    # Determine days since last run
+    last_run_date = read_last_run()
+    today = datetime.now().date()
+    if last_run_date:
+        days_since_last = (today - last_run_date).days
     else:
-        last_run = datetime.now() - timedelta(days=1)  # default if file missing
+        # if never run before, set to 1 day to allow reasonable chance to run
+        days_since_last = 1
 
-    days_since_last = (datetime.now().date() - last_run.date()).days
+    # Progressive chance: base + (0.15 * days since last), capped
+    base_chance = 0.2  # 20% base
+    progressive_chance = min(base_chance + 0.15 * days_since_last, 0.9)  # cap at 90%
+    print(f"[Sora] Days since last: {days_since_last}, chance to run today: {progressive_chance:.2f}")
 
-    # Base chance + increase if many days passed
-    base_chance = 0.2  # 20%
-    progressive_chance = min(base_chance + 0.15 * days_since_last, 0.9)  # max 90%
-    print(f"Days since last report: {days_since_last}, chance to run today: {progressive_chance:.2f}")
+    # Decide whether to run today
+    if random.random() >= progressive_chance:
+        print("[Sora] Taking a rest today :) No report sent.")
+        sys.exit(0)
 
-    if random.random() < progressive_chance:
-        # Random delay 0–4 hours
-        delay_seconds = random.randint(0, 4 * 3600)
-        print(f"Sora will send the report after {delay_seconds//3600} hours and {(delay_seconds%3600)//60} minutes...")
-        time.sleep(delay_seconds)
+    # If we decided to run, add a random 0-4 hour delay so timing is unpredictable
+    delay_seconds = random.randint(0, 4 * 3600)
+    hrs = delay_seconds // 3600
+    mins = (delay_seconds % 3600) // 60
+    print(f"[Sora] Waiting {hrs} hours and {mins} minutes before sending...")
+    time.sleep(delay_seconds)
 
+    # Fetch Trello data and generate report
+    try:
         board_data = get_board_data()
-        report_text, summary = generate_report(board_data)
-        send_to_discord_file(report_text, summary)
-        print("Report sent! (≧▽≦)")
+    except Exception as e:
+        print("[Sora] Failed to fetch Trello board:", e)
+        sys.exit(1)
 
-        # Update last run date
-        with open(LAST_RUN_FILE, "w") as f:
-            f.write(datetime.now().strftime("%Y-%m-%d"))
-    else:
-        print("Sora is taking a rest today :) No report sent.")
+    report_text, summary = generate_report(board_data)
+
+    # Send to Discord
+    try:
+        send_to_discord_file(report_text, summary)
+        print("[Sora] Report sent successfully!")
+        # update last run
+        write_last_run(today)
+    except Exception as e:
+        print("[Sora] Failed to send report:", e)
+        sys.exit(1)
