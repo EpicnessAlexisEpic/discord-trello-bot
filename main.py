@@ -65,9 +65,12 @@ def generate_report(board_id):
     return "\n".join(lines)
 
 def send_to_discord(message):
-    data = {"content": f"```{message}```"}
-    r = requests.post(WEBHOOK_URL, json=data)
+    with open("trello_report.txt", "w", encoding="utf-8") as f:
+        f.write(message)
+    with open("trello_report.txt", "rb") as f:
+        r = requests.post(WEBHOOK_URL, files={"file": f})
     r.raise_for_status()
+
 
 if __name__ == "__main__":
     report = generate_report(BOARD_ID)
