@@ -1,22 +1,14 @@
-# main.py
 import os
-import discord
-from discord.ext import tasks
 import requests
 
-# --- Load secrets from environment ---
-DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+# Load environment variables
 TRELLO_KEY = os.getenv("TRELLO_KEY")
 TRELLO_TOKEN = os.getenv("TRELLO_TOKEN")
 BOARD_ID = os.getenv("TRELLO_BOARD_ID")
-CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
-
-if not all([DISCORD_TOKEN, TRELLO_KEY, TRELLO_TOKEN, BOARD_ID, CHANNEL_ID]):
-    raise Exception("One or more environment variables are missing!")
+WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
 
 API_AUTH = {"key": TRELLO_KEY, "token": TRELLO_TOKEN}
 
-# --- Functions to get Trello data ---
 def get_board_lists(board_id):
     url = f"https://api.trello.com/1/boards/{board_id}/lists"
     r = requests.get(url, params=API_AUTH)
@@ -48,7 +40,7 @@ def card_is_done(card, checklists):
                 return False
     return True
 
-def generate_report(board_id, filename="trello_report.txt"):
+def generate_report(board_id):
     lists = get_board_lists(board_id)
     lines = []
 
@@ -70,35 +62,14 @@ def generate_report(board_id, filename="trello_report.txt"):
                     lines.append(f"      - {item.get('name')}  - {item_state}")
         lines.append("")
 
-    text = "\n".join(lines)
-    with open(filename, "w", encoding="utf-8") as f:
-        f.write(text)
-    return filename
+    return "\n".join(lines)
 
-# --- Discord bot ---
-intents = discord.Intents.default()
-intents.messages = True
-bot = discord.Bot(intents=intents)
+def send_to_discord(message):
+    data = {"content": f"```{message}```"}
+    r = requests.post(WEBHOOK_URL, json=data)
+    r.raise_for_status()
 
-@bot.event
-async def on_ready():
-    print(f"Logged in as {bot.user}")
-    send_report.start()  # start the scheduled task
-
-# --- Task to send report every 24h ---
-@tasks.loop(hours=24)
-async def send_report():
-    channel = bot.get_channel(CHANNEL_ID)
-    if channel is None:
-        print("Channel not found!")
-        return
-
-    filename = generate_report(BOARD_ID)
-    try:
-        await channel.send(file=discord.File(filename))
-        print("Report sent to Discord channel.")
-    except Exception as e:
-        print("Failed to send report:", e)
-
-# --- Run bot ---
-bot.run(DISCORD_TOKEN)
+if __name__ == "__main__":
+    report = generate_report(BOARD_ID)
+    send_to_discord(report)
+    print("Report sent!")
